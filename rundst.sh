@@ -173,7 +173,7 @@ function basic_start_shard() {
 	fi
 
 	"${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process $2 \
-		-shard "$1"  | sed "s/^/$3($BASHPID):  /"
+		-shard "$1"  | sed -u -e "s/^/$3($BASHPID):  /"
 }
 
 function start_single_shard() {
