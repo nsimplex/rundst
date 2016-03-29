@@ -9,6 +9,13 @@
 # Configurable parameters of the script
 #
 
+# Prefix for running a binary under the Steam runtime. Use this to export
+# LD_LIBRARY_PATH in case you lack system wide installations of some libraries.
+# It can also be the path to a wrapper script doing the exporting.
+#
+# Set to () to disable it.
+steamrun=(steamrun)
+
 # Directory where to install the dedicated server.
 install_dir="$HOME/Documents/dontstarve/server"
 
@@ -151,7 +158,8 @@ check_for_file "$install_dir/bin"
 
 cd "$install_dir/bin" || fail 
 
-run_shard=(./dontstarve_dedicated_server_nullrenderer)
+run_shard=("${steamrun[@]}")
+run_shard+=(./dontstarve_dedicated_server_nullrenderer)
 run_shard+=(-console)
 run_shard+=(-cluster "$cluster_name")
 
