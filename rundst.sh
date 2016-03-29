@@ -9,13 +9,6 @@
 # Configurable parameters of the script
 #
 
-# Prefix for running a binary under the Steam runtime. Use this to export
-# LD_LIBRARY_PATH in case you lack system wide installations of some libraries.
-# It can also be the path to a wrapper script doing the exporting.
-#
-# Set to () to disable it.
-steamrun=(steamrun)
-
 # Directory where to install the dedicated server.
 install_dir="$HOME/Documents/dontstarve/server"
 
@@ -28,6 +21,14 @@ dontstarve_dir="$HOME/.klei/DoNotStarveTogether"
 
 # Number of lines to store in the Lua console's history.
 histsize=128
+
+# Prefix for running the dedicated server binary under the Steam runtime. Use
+# this to export LD_LIBRARY_PATH in case you lack system wide installations of
+# some libraries.  It can also be the path to a wrapper script doing the
+# exporting.
+#
+# Set to () to disable it.
+bin_prefix=()
 
 #######################################################
 
@@ -141,6 +142,29 @@ if [[ "$1" == update ]]; then
 	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
 fi
 
+#######################################################
+
+# Exports environment variables to smooth out dependency hell.
+#
+# Primarily, it attempts to hook to the Steam runtime.
+function setupEnvironment() {
+	local PREFIX="$HOME/.steam/steam/ubuntu12_32/steam-runtime/i386/"
+	if [[ -d "$PREFIX" ]]; then
+		echo "${BOLD}Hooking to the Steam runtime.${NORMAL}"
+		local RUNTIME="$PREFIX/usr/lib/i386-linux-gnu:$PREFIX/lib/i386-linux-gnu"
+		if [[ ! -z "$LD_LIBRARY_PATH" ]]; then
+			LD_LIBRARY_PATH="$RUNTIME:$LD_LIBRARY_PATH"
+		else
+			LD_LIBRARY_PATH="$RUNTIME"
+		fi
+		export LD_LIBRARY_PATH
+	fi
+}
+
+setupEnvironment
+
+#######################################################
+
 check_list clusters "$1" "${clusters[@]}"
 cluster_name="$1"
 
@@ -158,7 +182,7 @@ check_for_file "$install_dir/bin"
 
 cd "$install_dir/bin" || fail 
 
-run_shard=("${steamrun[@]}")
+run_shard=("${bin_prefix[@]}")
 run_shard+=(./dontstarve_dedicated_server_nullrenderer)
 run_shard+=(-console)
 run_shard+=(-cluster "$cluster_name")
