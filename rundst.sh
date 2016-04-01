@@ -102,12 +102,15 @@ function check_for_cmd() {
 }
 
 function usage() {
-	echo "Usage: $0 update | $0 <cluster-name> [shard]"
+	echo "Usage: $0 update | $0 <cluster-name> [shard] [options...]"
 	
 	echo ""
 	echo "In the first form, installs or updates the dedicated server."
 	echo "In the second form, launches a given cluster. If no shard name"
 	echo "is specified, all shards in the given cluster are launched".
+	echo ""
+	echo "Arguments starting with a '-' are passed as extra options to"
+	echo "the dedicated server."
 	echo ""
 
 	echo "${BOLD}Available clusters${NORMAL}:"
@@ -131,15 +134,32 @@ done
 
 #######################################################
 
-if [[ -z "$1" ]]; then
-	usage >&2
-	exit 0
+if [[ "$1" == update ]]; then
+	check_for_cmd "$steamcmd"
+	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
 fi
 
-check_for_cmd "$steamcmd"
+#######################################################
 
-if [[ "$1" == update ]]; then
-	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
+args=()
+serveropts=()
+
+for arg in "$@"; do
+	if [[ "$arg" == -* ]]; then
+		serveropts+=("$arg")
+	else
+		args+=("$arg")
+	fi
+done
+
+cluster_name="${args[0]}"
+shardname="${args[1]}"
+
+#######################################################
+
+if [[ -z "$cluster_name" ]]; then
+	usage >&2
+	exit 0
 fi
 
 #######################################################
@@ -165,8 +185,7 @@ setupEnvironment
 
 #######################################################
 
-check_list clusters "$1" "${clusters[@]}"
-cluster_name="$1"
+check_list clusters "${cluster_name}" "${clusters[@]}"
 
 shards=()
 for s in $(shards_of "$cluster_name"); do
@@ -175,8 +194,13 @@ done
 
 check_for_file "$dontstarve_dir/$cluster_name/cluster.ini"
 check_for_file "$dontstarve_dir/$cluster_name/cluster_token.txt"
-check_for_file "$dontstarve_dir/$cluster_name/Master/server.ini"
-#check_for_file "$dontstarve_dir/$cluster_name/Caves/server.ini"
+
+if [[ -z "$shardname" ]]; then
+	check_for_file "$dontstarve_dir/$cluster_name/Master/server.ini"
+else
+	check_list shards "$2" "${shards[@]}"
+	check_for_file "$dontstarve_dir/$cluster_name/$shardname/server.ini"
+fi
 
 check_for_file "$install_dir/bin"
 
@@ -205,7 +229,7 @@ function basic_start_shard() {
 	fi
 
 	"${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process $2 \
-		-shard "$1"  | sed -u -e "s/^/$3($BASHPID):  /"
+		-shard "$1" "${serveropts[@]}"  | sed -u -e "s/^/$3($BASHPID):  /"
 }
 
 function start_single_shard() {
@@ -240,7 +264,6 @@ if [[ -z "$2" ]]; then
 
 	start_master_shard
 else
-	check_list shards "$2" "${shards[@]}"
 	start_single_shard "$2"
 fi
 
