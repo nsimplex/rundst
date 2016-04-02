@@ -19,6 +19,10 @@ steamcmd=steamcmd
 # Directory where DST's savedata is stored.
 dontstarve_dir="$HOME/.klei/DoNotStarveTogether"
 
+# Directory where Steam is installed. If this optional entry is set, the Steam
+# runtime will be used to run the dedicated servers.
+steamroot="$HOME/.steam/steam"
+
 # Number of lines to store in the Lua console's history.
 histsize=128
 
@@ -168,7 +172,7 @@ fi
 #
 # Primarily, it attempts to hook to the Steam runtime.
 function setupEnvironment() {
-	local PREFIX="$HOME/.steam/steam/ubuntu12_32/steam-runtime/i386/"
+	local PREFIX="$steamroot/ubuntu12_32/steam-runtime/i386/"
 	if [[ -d "$PREFIX" ]]; then
 		echo "${BOLD}Hooking to the Steam runtime.${NORMAL}"
 		local RUNTIME="$PREFIX/usr/lib/i386-linux-gnu:$PREFIX/lib/i386-linux-gnu"
@@ -180,8 +184,6 @@ function setupEnvironment() {
 		export LD_LIBRARY_PATH
 	fi
 }
-
-setupEnvironment
 
 #######################################################
 
@@ -220,7 +222,7 @@ children_pids=()
 mutex_pid=$!
 
 function basic_start_shard() {
-	echo "Starting shard $1..."
+	echo "${BOLD}Starting shard $1...${NORMAL}"
 
 	local PRECMDS=()
 	if [[ $BASHPID -eq $self_pid ]]; then
@@ -254,6 +256,15 @@ function start_slave_shard() {
 	children_pids+=($!)
 	shard_idx=$(( $shard_idx + 1 ))
 }
+
+#
+
+clear
+clear
+
+setupEnvironment
+
+#
 
 if [[ -z "$2" ]]; then
 	for shard in "${shards[@]}"; do
