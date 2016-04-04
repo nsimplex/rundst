@@ -60,6 +60,22 @@ INDENT2="${INDENT}${INDENT}"
 
 #######################################################
 
+args=()
+serveropts=()
+
+for arg in "$@"; do
+	if [[ "$arg" == -* ]]; then
+		serveropts+=("$arg")
+	else
+		args+=("$arg")
+	fi
+done
+
+cluster_name="${args[0]}"
+shardname="${args[1]}"
+
+#######################################################
+
 # lib
 
 function subdirectories() {
@@ -138,26 +154,11 @@ done
 
 #######################################################
 
-if [[ "$1" == update ]]; then
+if [[ "$clustername" == update ]]; then
 	check_for_cmd "$steamcmd"
 	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
 fi
 
-#######################################################
-
-args=()
-serveropts=()
-
-for arg in "$@"; do
-	if [[ "$arg" == -* ]]; then
-		serveropts+=("$arg")
-	else
-		args+=("$arg")
-	fi
-done
-
-cluster_name="${args[0]}"
-shardname="${args[1]}"
 
 #######################################################
 
@@ -200,7 +201,7 @@ check_for_file "$dontstarve_dir/$cluster_name/cluster_token.txt"
 if [[ -z "$shardname" ]]; then
 	check_for_file "$dontstarve_dir/$cluster_name/Master/server.ini"
 else
-	check_list shards "$2" "${shards[@]}"
+	check_list shards "$shardname" "${shards[@]}"
 	check_for_file "$dontstarve_dir/$cluster_name/$shardname/server.ini"
 fi
 
@@ -266,7 +267,7 @@ setupEnvironment
 
 #
 
-if [[ -z "$2" ]]; then
+if [[ -z "$shardname" ]]; then
 	for shard in "${shards[@]}"; do
 		if [[ "$shard" != Master ]]; then
 			start_slave_shard "$shard"
@@ -275,7 +276,7 @@ if [[ -z "$2" ]]; then
 
 	start_master_shard
 else
-	start_single_shard "$2"
+	start_single_shard "$shardname"
 fi
 
 echo "${BOLD}Shut dedicated server down.${NORMAL}"
