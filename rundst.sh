@@ -188,8 +188,11 @@ function list_ilookup() {
 
 function check_list() {
 	local listname="$1"
+	shift
+	local needle="$1"
+	shift
 
-	if list_ilookup "${@:2}" >/dev/null; then
+	if ! list_ilookup "$needle" "$@" >/dev/null; then
 		fail "Unable to find '$needle' in list '$listname'"
 	fi
 }
@@ -211,12 +214,34 @@ function check_for_cmd() {
 # Argument processing
 #
 
+
 args=()
 serveropts=()
 
+unset FORCE
+unset NO_MORE_OPTIONS
+
+function process_option() {
+	if [[ -z "$NO_MORE_OPTIONS" ]]; then
+		case "$1" in
+			"-f")
+				FORCE=1
+				return
+				;;
+			"--")
+				NO_MORE_OPTIONS=1
+				return
+				;;
+			*)
+				;;
+		esac
+	fi
+	serveropts+=("$1")
+}
+
 for arg in "$@"; do
 	if [[ "$arg" == -* ]]; then
-		serveropts+=("$arg")
+		process_option "$arg"
 	else
 		args+=("$arg")
 	fi
@@ -227,15 +252,28 @@ cluster_name="${args[0]}"
 #######################################################
 
 function usage() {
-	echo "Usage: $0 update | $0 <cluster-name> [shard] [options...]"
+	cat <<EOS
+Usage: $0 [options...] [--] [server-options...] <cluster-name> [shards...]
+	 | $0 update
+
+Launches a Don't Starve Together dedicated server cluster, or updates a Don't
+Starve Together dedicated server installation with steamcmd.
 	
-	echo ""
-	echo "In the first form, installs or updates the dedicated server."
-	echo "In the second form, launches a given cluster. If no shard name"
-	echo "is specified, all shards in the given cluster are launched".
-	echo ""
-	echo "Arguments starting with a '-' are passed as extra options to"
-	echo "the dedicated server."
+In the first form, launches a given cluster. If no shard name is specified, all
+shards in the given cluster are launched; otherwise, precisely shards listed
+are launched. The following options are recognized:
+
+  -f	If a shard whose name was explicitly given does not exist, create it
+		with default configurations instead of raising an error.
+
+Any other argument starting with a '-' differing from the ones listed above, or
+any argument starting with a '-' after the optional positional parameter '--',
+is interpreted as a server option and passed verbatim to the invocation of the
+dedicated server executable for every shard.
+
+In the second form, installs or updates the dedicated server.
+EOS
+
 	echo ""
 
 	echo "${BOLD}Available clusters${NORMAL}:"
@@ -257,6 +295,8 @@ fi
 
 #######################################################
 
+check_for_file "$dontstarve_dir"
+
 clusters=()
 for subdir in $(subdirectories "$dontstarve_dir"); do
 	if [[ -e "$dontstarve_dir/$subdir/cluster.ini" ]]; then
@@ -269,7 +309,8 @@ if [[ -z "$cluster_name" ]]; then
 	exit 0
 fi
 
-check_for_file "$(get_cluster_witness "$cluster_name")"
+#check_for_file "$(get_cluster_witness "$cluster_name")"
+check_list "clusters" "$cluster_name" "${clusters[@]}"
 
 #######################################################
 
@@ -337,7 +378,12 @@ function setupEnvironment() {
 check_for_file "$dontstarve_dir/$cluster_name/cluster_token.txt"
 
 for s in "${chosen_shardnames[@]}"; do
-	check_for_file "$(get_shard_witness "$cluster_name" "$s")"
+	if [[ -z "$FORCE" ]]; then
+		#check_for_file "$(get_shard_witness "$cluster_name" "$s")"
+		check_list "shards" "$s" "${shards[@]}"
+	else
+		mkdir -p "$dontstarve_dir/$cluster_name/$s"
+	fi
 done
 
 check_for_file "$install_dir/bin"
@@ -361,19 +407,31 @@ slave_shard_idx=0
 function basic_start_shard() {
 	echo "${BOLD}Starting shard $1...${NORMAL}"
 
+	local MYPID=$BASHPID
+
 	local PRECMDS=()
-	if [[ $BASHPID -eq $self_pid && ! -z "$rlwrap_cmd" ]]; then
-		local histfile="$dontstarve_dir/$cluster_name/$1/tty_console_hist.txt"
-		PRECMDS+=("$rlwrap_cmd" -H "$histfile" -s $histsize)
+
+	if [[ $MYPID -ne $self_pid ]]; then
+		PRECMDS+=("exec")
 	fi
 
-	echo "${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process $2 \
-		-shard "$1" "${serveropts[@]}"  | sed -u -e "s/^/$3($BASHPID):  /"
+	if [[ $$ -eq $self_pid && ! -z "$rlwrap_cmd" ]]; then
+		local histfile="$dontstarve_dir/$cluster_name/$1/tty_console_hist.txt"
+		local prompt="$2> "
+		touch "$histfile"
+		PRECMDS+=("$rlwrap_cmd" -R -H "$histfile" -s $histsize -f . -S "$prompt")
+	fi
+
+	local fullcmd=("${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process 
+		"$MYPID" -shard "$1" "${serveropts[@]}")
+
+	echo "${BOLD}Running${NORMAL} '${fullcmd[@]}'..."
+	"${fullcmd[@]}"
 }
 
 function prettify_shardname() {
 	local COLOR
-	if [[ "$1" == Master ]]; then
+	if is_cluster_master_shard "$cluster_name" "$1"; then
 		COLOR=${MASTER_SHARD_COLOR}
 	else
 		COLOR=${SLAVE_SHARD_COLORS[$slave_shard_idx]}
@@ -382,15 +440,17 @@ function prettify_shardname() {
 }
 
 function start_single_shard() {
-	basic_start_shard "$1" $self_pid "$(prettify_shardname "$1")"
-}
-
-function start_master_shard() {
-	start_single_shard Master
+	local name="$(prettify_shardname "$1")"
+	(local MYPID=$BASHPID ;
+	 basic_start_shard "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
+	 )
 }
 
 function start_slave_shard() {
-	basic_start_shard "$1" $self_pid "$(prettify_shardname "$1")" &
+	local name="$(prettify_shardname "$1")"
+	(local MYPID=$BASHPID ;
+	 basic_start_shard "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
+	 ) &
 	children_pids+=($!)
 	slave_shard_idx=$(( $slave_shard_idx + 1 ))
 }
@@ -412,5 +472,9 @@ setupEnvironment
 #
 
 start_shard_list "${chosen_shardnames[@]}"
+if [[ ${#children_pids[@]} -gt 0 ]]; then
+	kill "${children_pids[@]}" >/dev/null 2>&1
+	wait "${children_pids[@]}"
+fi
 
-echo "${BOLD}Finished shutting down $(prettify_shardname "${chosen_shardnames[0]}")${BOLD}.${NORMAL}"
+echo "${BOLD}Finished shutting down cluster '$cluster_name'.${NORMAL}"
