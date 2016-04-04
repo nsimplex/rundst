@@ -2,10 +2,11 @@
 #  File: rundst.sh
 #  Author: simplex
 #  Created: 2016-03-24
-#  Last Update: 2016-03-24
+#  Last Update: 2016-04-04
 #  Notes:
 
-###
+#######################################################
+# 
 # Configurable parameters of the script
 #
 
@@ -28,37 +29,187 @@ histsize=128
 
 # Prefix for running the dedicated server binary under the Steam runtime. Use
 # this to export LD_LIBRARY_PATH in case you lack system wide installations of
-# some libraries.  It can also be the path to a wrapper script doing the
-# exporting.
+# some libraries and cannot rely on the Steam runtime.
+# 
+# This can also be the path to a wrapper script doing the exporting.
 #
 # Set to () to disable it.
 bin_prefix=()
 
+# Command used to invoke rlwrap, used to provide true line-oriented editing
+# support for the dedicated server's command line Lua console.
+#
+# Unset it to disable rlwrap usage.
+rlwrap_cmd=rlwrap
+
+
+
 #######################################################
+#
+# Basic text UI utilities, using ANSI escape codes.
+# We only use these if stdout is bound to a terminal.
+# 
 
-# Basic text UI utilities
+if [[ -t 1 ]]; then
+	NORMAL=$'\e[0m'
+	BOLD=$'\e[1m'
 
-NORMAL=$'\e[0m'
-BOLD=$'\e[1m'
+	RED=$'\e[31m'
+	GREEN=$'\e[32m'
+	YELLOW=$'\e[33m'
+	BLUE=$'\e[34m'
+	MAGENTA=$'\e[35m'
+	CYAN=$'\e[36m'
 
-RED=$'\e[31m'
-GREEN=$'\e[32m'
-YELLOW=$'\e[33m'
-BLUE=$'\e[34m'
-MAGENTA=$'\e[35m'
-CYAN=$'\e[36m'
-
-GREENBOLD=$'\e[32;1m'
+	GREENBOLD=$'\e[32;1m'
+fi
 
 MASTER_SHARD_COLOR=$GREEN
-SLAVE_SHARD_COLORS=($YELLOW $CYAN $RED $MAGENTA "" $BLUE)
+SLAVE_SHARD_COLORS=($CYAN $YELLOW $RED $MAGENTA "" $BLUE)
 
 TAB=$'\t'
+HALFSOFTTAB='  '
+SOFTTAB="${HALFSOFTTAB}${HALFSOFTTAB}"
 
-INDENT=$'    '
+INDENT0_5="${HALFSOFTTAB}"
+INDENT="$SOFTTAB"
+INDENT1_5="${INDENT}${INDENT0_5}"
 INDENT2="${INDENT}${INDENT}"
 
+
 #######################################################
+#
+# lib
+#
+
+function fail() {
+    echo "${RED}${BOLD}Error${NORMAL}:" "$@" >&2
+    exit 1
+}
+
+function warn() {
+	echo "${MAGENTA}${BOLD}Warning${NORMAL}:" "$@" >&2
+}
+
+
+function subdirectories() {
+	local name=$(basename "$1")
+	find "$1" -maxdepth 1 -type d -a \( -name "$name" -o -printf '%f\n' \)
+}
+
+function get_cluster_witness() {
+	echo -n "$dontstarve_dir/$1/cluster.ini"
+}
+
+function get_shard_witness() {
+	echo -n "$dontstarve_dir/$1/$2/server.ini"
+}
+
+function cluster_has_shard() {
+	[[ -e "$(get_shard_witness "$1" "$2")" ]]
+	return $?
+}
+
+function is_cluster_master_shard() {
+	local witness="$(get_shard_witness "$1" "$2")"
+	[[ -r "$witness" ]] \
+		&& grep -q -wi -m 1 'is_master[[:space:]]*=[[:space:]]*true' "$witness"
+	return $?
+}
+
+# Receives (1 + n) arguments, where the first is the cluster name, and the ones
+# following that are names of potential shards in that cluster (by potential, I
+# mean they mean or may not exist).
+#
+# Outputs the list (line by line) with the master shard in the front. In case
+# of multiple master shards, discards the ones after the first (with a warning
+# message).
+function sort_shards() {
+	local mastername
+	local maybe_mastername
+	local slavenames=()
+
+	for s in "${@:2}"; do
+		if is_cluster_master_shard "$1" "$s"; then
+			#echo "got master shard $s" >&2
+			if [[ -z "$mastername" ]]; then
+				mastername="$s"
+			else
+				warn "Multiple master shards ('$mastername' and '$s')."\
+					"Ignoring the second one."
+			fi
+		elif [[ -z "$maybe_mastername" && "${s,,}" == master ]]; then
+			maybe_mastername="$s"
+		else
+			slavenames+=("$s")
+		fi
+	done
+
+	if ! [[ -z "$mastername" ]]; then
+		echo "$mastername"
+	fi
+	if ! [[ -z "$maybe_mastername" ]]; then
+		echo "$maybe_mastername"
+	fi
+	for s in "${slavenames[@]}"; do
+		echo "$s"
+	done
+}
+
+function shards_of() {
+	local ret_shards=()
+
+	for s in $(subdirectories "$dontstarve_dir/$1"); do
+		if cluster_has_shard "$1" "$s"; then
+			ret_shards+=("$s")
+		fi
+	done
+
+	sort_shards "$1" "${ret_shards[@]}"
+	return $?
+}
+
+# Uses case-insensitive lookup to find a match of a string in a list of
+# strings. If found, the match from the list is echo'ed (in its original
+# casing). The function's return code also indicated whether a match was found
+# (0 is success).
+function list_ilookup() {
+	local needle="${1,,}"
+
+	for x in "${@:2}"; do
+		if [[ "${x,,}" == "$needle" ]]; then
+			echo "$x"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+function check_list() {
+	local listname="$1"
+
+	if list_ilookup "${@:2}" >/dev/null; then
+		fail "Unable to find '$needle' in list '$listname'"
+	fi
+}
+
+function check_for_file() {
+    if [[ ! -e "$1" ]]; then
+        fail "Missing file: $1"
+    fi
+}
+
+function check_for_cmd() {
+	if ! which "$1" >/dev/null; then
+		fail "Missing command: $1"
+	fi
+}
+
+#######################################################
+# 
+# Argument processing
+#
 
 args=()
 serveropts=()
@@ -72,54 +223,8 @@ for arg in "$@"; do
 done
 
 cluster_name="${args[0]}"
-shardname="${args[1]}"
 
 #######################################################
-
-# lib
-
-function subdirectories() {
-	local name=$(basename "$1")
-	find "$1" -maxdepth 1 -type d -a \( -name "$name" -o -printf '%f\n' \)
-}
-
-function shards_of() {
-	for s in $(subdirectories "$dontstarve_dir/$1"); do
-		if [[ -e "$dontstarve_dir/$1/$s/server.ini" ]]; then
-			echo "$s"
-		fi
-	done
-}
-
-function fail() {
-        echo "${RED}${BOLD}Error${NORMAL}:" "$@" >&2
-        exit 1
-}
-
-function check_list() {
-	local listname="$1"
-	local needle="$2"
-	
-	for x in "${@:3}"; do
-		if [[ "$x" == "$needle" ]]; then
-			return
-		fi
-	done
-
-	fail "Unable to find '$needle' in list '$listname'"
-}
-
-function check_for_file() {
-    if [ ! -e "$1" ]; then
-            fail "Missing file: $1"
-    fi
-}
-
-function check_for_cmd() {
-	if ! which "$1" >/dev/null; then
-		fail "Missing command: $1"
-	fi
-}
 
 function usage() {
 	echo "Usage: $0 update | $0 <cluster-name> [shard] [options...]"
@@ -136,12 +241,19 @@ function usage() {
 	echo "${BOLD}Available clusters${NORMAL}:"
 	for c in "${clusters[@]}"; do
 		echo "${INDENT}${GREENBOLD}${c}${NORMAL}"
-		echo "${INDENT2}${BOLD}Shards${NORMAL}:"
+		echo "${INDENT1_5}${BOLD}Shards${NORMAL}:"
 		for s in $(shards_of "$c"); do
 			echo -e "${INDENT2}${CYAN}${s}${NORMAL}"
 		done
 	done
 }
+
+#######################################################
+
+if [[ "$cluster_name" == update ]]; then
+	check_for_cmd "$steamcmd"
+	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
+fi
 
 #######################################################
 
@@ -152,19 +264,48 @@ for subdir in $(subdirectories "$dontstarve_dir"); do
 	fi
 done
 
-#######################################################
-
-if [[ "$clustername" == update ]]; then
-	check_for_cmd "$steamcmd"
-	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
-fi
-
-
-#######################################################
-
 if [[ -z "$cluster_name" ]]; then
 	usage >&2
 	exit 0
+fi
+
+check_for_file "$(get_cluster_witness "$cluster_name")"
+
+#######################################################
+
+shards=()
+for s in $(shards_of "$cluster_name"); do
+	shards+=("$s")
+done
+
+function normalize_shardname() {
+	local norm1="$(list_ilookup "$1" "${shards[@]}")"
+	if [[ -z "$norm1" ]]; then
+		echo -n "$1"
+	else
+		echo -n "$norm1"
+	fi
+}
+
+#######################################################
+
+chosen_shardnames=()
+for s in "${args[@]:1}"; do
+	chosen_shardnames+=("$(normalize_shardname "$s")")
+done
+
+if [[ ${#chosen_shardnames[@]} -eq 0 ]]; then
+	if [[ ${#shards[@]} -eq 0 ]]; then
+		fail "The cluster '$cluster_name' has no shards."
+	fi
+
+	chosen_shardnames=("${shards[@]}")
+else
+	chosen_shardnames=($(sort_shards "$cluster_name" "${chosen_shardnames[@]}"))
+fi
+
+if [[ ${#chosen_shardnames[@]} -eq 0 ]]; then
+	fail "Logic error."
 fi
 
 #######################################################
@@ -173,6 +314,8 @@ fi
 #
 # Primarily, it attempts to hook to the Steam runtime.
 function setupEnvironment() {
+	if [[ -z "$steamroot" ]]; then return; fi
+
 	local PREFIX="$steamroot/ubuntu12_32/steam-runtime/i386/"
 	if [[ -d "$PREFIX" ]]; then
 		echo "${BOLD}Hooking to the Steam runtime.${NORMAL}"
@@ -183,31 +326,25 @@ function setupEnvironment() {
 			LD_LIBRARY_PATH="$RUNTIME"
 		fi
 		export LD_LIBRARY_PATH
+	else
+		warn "Steam runtime prefix doesn't exist or isn't a directory:" \
+			$'\n'"$PREFIX"
 	fi
 }
 
 #######################################################
 
-check_list clusters "${cluster_name}" "${clusters[@]}"
-
-shards=()
-for s in $(shards_of "$cluster_name"); do
-	shards+=("$s")
-done
-
-check_for_file "$dontstarve_dir/$cluster_name/cluster.ini"
 check_for_file "$dontstarve_dir/$cluster_name/cluster_token.txt"
 
-if [[ -z "$shardname" ]]; then
-	check_for_file "$dontstarve_dir/$cluster_name/Master/server.ini"
-else
-	check_list shards "$shardname" "${shards[@]}"
-	check_for_file "$dontstarve_dir/$cluster_name/$shardname/server.ini"
-fi
+for s in "${chosen_shardnames[@]}"; do
+	check_for_file "$(get_shard_witness "$cluster_name" "$s")"
+done
 
 check_for_file "$install_dir/bin"
 
 cd "$install_dir/bin" || fail 
+
+#######################################################
 
 run_shard=("${bin_prefix[@]}")
 run_shard+=(./dontstarve_dedicated_server_nullrenderer)
@@ -216,46 +353,53 @@ run_shard+=(-cluster "$cluster_name")
 
 # PIDs
 self_pid=$$
-children_spawner_pid=
 children_pids=()
 
-(kill -STOP $BASHPID) &
-mutex_pid=$!
+# Index of the current slave shard being processed.
+slave_shard_idx=0
 
 function basic_start_shard() {
 	echo "${BOLD}Starting shard $1...${NORMAL}"
 
 	local PRECMDS=()
-	if [[ $BASHPID -eq $self_pid ]]; then
+	if [[ $BASHPID -eq $self_pid && ! -z "$rlwrap_cmd" ]]; then
 		local histfile="$dontstarve_dir/$cluster_name/$1/tty_console_hist.txt"
-		PRECMDS+=(rlwrap -H "$histfile" -s $histsize)
+		PRECMDS+=("$rlwrap_cmd" -H "$histfile" -s $histsize)
 	fi
 
-	"${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process $2 \
+	echo "${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process $2 \
 		-shard "$1" "${serveropts[@]}"  | sed -u -e "s/^/$3($BASHPID):  /"
 }
 
-function start_single_shard() {
-	local name="$1"
-	local COLOR=${MASTER_SHARD_COLOR}
-	local PREFIX="${COLOR}${BOLD}${name}${NORMAL}"
+function prettify_shardname() {
+	local COLOR
+	if [[ "$1" == Master ]]; then
+		COLOR=${MASTER_SHARD_COLOR}
+	else
+		COLOR=${SLAVE_SHARD_COLORS[$slave_shard_idx]}
+	fi
+	echo -n "${COLOR}${BOLD}$1${NORMAL}"
+}
 
-	basic_start_shard "${name}" $self_pid "$PREFIX"
+function start_single_shard() {
+	basic_start_shard "$1" $self_pid "$(prettify_shardname "$1")"
 }
 
 function start_master_shard() {
 	start_single_shard Master
 }
 
-shard_idx=0
 function start_slave_shard() {
-	local name="$1"
-	local COLOR=${SLAVE_SHARD_COLORS[$shard_idx]}
-	local PREFIX="${COLOR}${BOLD}${name}${NORMAL}"
-
-	basic_start_shard "${name}" $self_pid "$PREFIX" &
+	basic_start_shard "$1" $self_pid "$(prettify_shardname "$1")" &
 	children_pids+=($!)
-	shard_idx=$(( $shard_idx + 1 ))
+	slave_shard_idx=$(( $slave_shard_idx + 1 ))
+}
+
+function start_shard_list() {
+	for shard in "${@:2}"; do
+		start_slave_shard "$shard"
+	done
+	start_single_shard "$1"
 }
 
 #
@@ -267,16 +411,6 @@ setupEnvironment
 
 #
 
-if [[ -z "$shardname" ]]; then
-	for shard in "${shards[@]}"; do
-		if [[ "$shard" != Master ]]; then
-			start_slave_shard "$shard"
-		fi
-	done
+start_shard_list "${chosen_shardnames[@]}"
 
-	start_master_shard
-else
-	start_single_shard "$shardname"
-fi
-
-echo "${BOLD}Shut dedicated server down.${NORMAL}"
+echo "${BOLD}Finished shutting down $(prettify_shardname "${chosen_shardnames[0]}")${BOLD}.${NORMAL}"
