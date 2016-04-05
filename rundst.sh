@@ -216,10 +216,17 @@ function update_game() {
     if [[ -z "$branch" ]]; then
         branch="$DST_BETA_BRANCH"
     fi
+    local branchcode="$2"
+    if [[ -z "$branchcode" ]]; then
+        branchcode="$DST_BETA_CODE"
+    fi
 
     local innercmd=( +app_update 343050 )
     if [[ ! -z "$branch" ]]; then
         innercmd+=( -beta "$branch" )
+        if [[ ! -z "$branchcode" ]]; then
+            innercmd+=( -betapassword "$branchcode" )
+        fi
     fi
 
     local fullcmd=( "$steamcmd" +force_install_dir "$install_dir"
@@ -227,8 +234,7 @@ function update_game() {
 
     echo "${BOLD}Running${NORMAL} '${fullcmd[*]}'${BOLD}...${NORMAL}"
 	
-    exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous \
-        "${innercmd[@]}" validate +quit
+    exec "${fullcmd[@]}"
 }
 
 #######################################################
@@ -276,7 +282,7 @@ cluster_name="${args[0]}"
 function usage() {
 	cat <<EOS
 Usage: $0 [options...] [--] [server-options...] <cluster-name> [shards...]
-	 | $0 update [beta-branch]
+	 | $0 update [beta-branch] [beta-code]
 
 Launches a Don't Starve Together dedicated server cluster, or updates a Don't
 Starve Together dedicated server installation with steamcmd.
@@ -295,8 +301,10 @@ dedicated server executable for every shard.
 
 In the second form, installs or updates the dedicated server. If the optional
 'beta-branch' argument is given, installs/updates the DST beta branch with that
-name instead. If 'beta-branch' is absent but an environment variable called
-'DST_BETA_BRANCH' is set, that value is used for 'beta-branch'.
+name instead; if 'beta-code' is given, it is used as the password for a private
+beta.  If 'beta-branch' is absent but an environment variable called
+'DST_BETA_BRANCH' is set, that value is used for 'beta-branch'. Similarly,
+'beta-code' defaults to the value of the 'DST_BETA_CODE' environment variable.
 EOS
 
 	echo ""
@@ -314,7 +322,7 @@ EOS
 #######################################################
 
 if [[ "$cluster_name" == update ]]; then
-    update_game "${args[1]}"
+    update_game "${args[@]:1}"
     fail "Logic error. We should've exec'ed."
 fi
 

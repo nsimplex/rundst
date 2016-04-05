@@ -21,9 +21,8 @@ First check the top part of the script, titled "Configurable parameters of the s
 
 Running the script with no arguments will print a usage message, followed by the list of clusters and their shards detected on your system. The usage message is printed below (though check the script's own output to make sure it is up to date):
 
-
     Usage: ./rundst.sh [options...] [--] [server-options...] <cluster-name> [shards...]
-    	 | ./rundst.sh update [beta-branch]
+    	 | ./rundst.sh update [beta-branch] [beta-code]
     
     Launches a Don't Starve Together dedicated server cluster, or updates a Don't
     Starve Together dedicated server installation with steamcmd.
@@ -42,8 +41,10 @@ Running the script with no arguments will print a usage message, followed by the
     
     In the second form, installs or updates the dedicated server. If the optional
     'beta-branch' argument is given, installs/updates the DST beta branch with that
-    name instead. If 'beta-branch' is absent but an environment variable called
-    'DST_BETA_BRANCH' is set, that value is used for 'beta-branch'.
+    name instead; if 'beta-code' is given, it is used as the password for a private
+    beta.  If 'beta-branch' is absent but an environment variable called
+    'DST_BETA_BRANCH' is set, that value is used for 'beta-branch'. Similarly,
+    'beta-code' defaults to the value of the 'DST_BETA_CODE' environment variable.
     
 ### Installation
 
