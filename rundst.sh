@@ -425,7 +425,9 @@ function basic_start_shard() {
 			(basic_start_shard "" "$@") &
 		else
 			exec 6< <("${wrapcmd[@]}" stdbuf -i0 -o0 cat && echo ';' && echo 'c_shutdown();')
-			(basic_start_shard "final" "$@") <&6
+			if ! (basic_start_shard "final" "$@") <&6; then
+                stty echo
+            fi
 			exec 6<&-
 		fi
 		return $?
