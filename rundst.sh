@@ -209,6 +209,28 @@ function check_for_cmd() {
 	fi
 }
 
+function update_game() {
+    check_for_cmd "$steamcmd"
+    
+    local branch="$1"
+    if [[ -z "$branch" ]]; then
+        branch="$DST_BETA_BRANCH"
+    fi
+
+    local innercmd=( +app_update 343050 )
+    if [[ ! -z "$branch" ]]; then
+        innercmd+=( -beta "$branch" )
+    fi
+
+    local fullcmd=( "$steamcmd" +force_install_dir "$install_dir"
+        +login anonymous "${innercmd[@]}" validate +quit )
+
+    echo "${BOLD}Running${NORMAL} '${fullcmd[*]}'${BOLD}...${NORMAL}"
+	
+    exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous \
+        "${innercmd[@]}" validate +quit
+}
+
 #######################################################
 # 
 # Argument processing
@@ -254,7 +276,7 @@ cluster_name="${args[0]}"
 function usage() {
 	cat <<EOS
 Usage: $0 [options...] [--] [server-options...] <cluster-name> [shards...]
-	 | $0 update
+	 | $0 update [beta-branch]
 
 Launches a Don't Starve Together dedicated server cluster, or updates a Don't
 Starve Together dedicated server installation with steamcmd.
@@ -271,7 +293,10 @@ any argument starting with a '-' after the optional positional parameter '--',
 is interpreted as a server option and passed verbatim to the invocation of the
 dedicated server executable for every shard.
 
-In the second form, installs or updates the dedicated server.
+In the second form, installs or updates the dedicated server. If the optional
+'beta-branch' argument is given, installs/updates the DST beta branch with that
+name instead. If 'beta-branch' is absent but an environment variable called
+'DST_BETA_BRANCH' is set, that value is used for 'beta-branch'.
 EOS
 
 	echo ""
@@ -289,8 +314,8 @@ EOS
 #######################################################
 
 if [[ "$cluster_name" == update ]]; then
-	check_for_cmd "$steamcmd"
-	exec "$steamcmd" +force_install_dir "$install_dir" +login anonymous +app_update 343050 validate +quit
+    update_game "${args[1]}"
+    fail "Logic error. We should've exec'ed."
 fi
 
 #######################################################
@@ -438,7 +463,7 @@ function basic_start_shard() {
 	###
 
 	local BASICOPTS=(-monitor-parent-process "$MYPID")
-	BASICOPTS+=(-cluster "$cluster_name" -shard "$shardid", -console)
+	BASICOPTS+=(-cluster "$cluster_name" -shard "$shardid" -console)
 
 	local fullcmd=("${run_shard[@]}"
 		"${BASICOPTS[@]}" "${serveropts[@]}")
