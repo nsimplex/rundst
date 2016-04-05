@@ -436,13 +436,7 @@ function basic_start_shard() {
 	###
 
 	local BASICOPTS=(-monitor-parent-process "$MYPID")
-	BASICOPTS+=(-cluster "$cluster_name" -shard "$shardid")
-
-	local wrapcmd=()
-
-	if [[ ! -z "$IS_FINAL" ]]; then
-		BASICOPTS+=(-console)
-	fi
+	BASICOPTS+=(-cluster "$cluster_name" -shard "$shardid", -console)
 
 	local fullcmd=("${run_shard[@]}"
 		"${BASICOPTS[@]}" "${serveropts[@]}")
