@@ -7,11 +7,11 @@ The main features of this script are:
 * Pretty printing of each shard's output, with each line preceded by the bold and uniquely colored shard's name, followed by its PID (process ids). Sending a `kill` command to a slave shard's PID will cause it to exit gracefully (i.e., properly saving and exiting the server). Sending a `kill` command to the master shard's PID will cause the whole cluster to exit gracefully.
 * Sending EOF (Ctrl-D) over an empty input line in the terminal is translated into a `c_shutdown()` command for the master shard. This causes the whole cluster to exit gracefully.
 * Extended editing support in the master shard's terminal Lua console via the GNU readline library.
-*    * Positional keys (arrows, Home, End, etc.) are supported when entering terminal input.
-*    * The Up/Down keys scroll through the saved command history (preserved between server invocations).
-*    * Ctrl-R provides reverse lookup on the command history.
-*    * Tab provides autocompletion based on the command history.
-*    * A prompt with the master shard name followed by "> " precedes command input.
+    * Positional keys (arrows, Home, End, etc.) are supported when entering terminal input.
+    * The Up/Down keys scroll through the saved command history (preserved between server invocations).
+    * Ctrl-R provides reverse lookup on the command history.
+    * Tab provides autocompletion based on the command history.
+    * A prompt with the master shard name followed by "> " precedes command input.
 * Sending EOF (Ctrl-D) over an empty input line is translated into a `c_shutdown()` command for the master shard. This causes the whole cluster to exit gracefully.
 
 ## Usage
