@@ -24,7 +24,7 @@ dontstarve_dir="$HOME/.klei/DoNotStarveTogether"
 # runtime will be used to run the dedicated servers.
 steamroot="$HOME/.steam/steam"
 
-# Number of lines to store in the Lua console's history.
+# Number of lines to store in the master shard's Lua console history.
 histsize=128
 
 # Prefix for running the dedicated server binary under the Steam runtime. Use
@@ -281,7 +281,7 @@ EOS
 		echo "${INDENT}${GREENBOLD}${c}${NORMAL}"
 		echo "${INDENT1_5}${BOLD}Shards${NORMAL}:"
 		for s in $(shards_of "$c"); do
-			echo -e "${INDENT2}${CYAN}${s}${NORMAL}"
+			echo "${INDENT2}${CYAN}${s}${NORMAL}"
 		done
 	done
 }
@@ -394,8 +394,6 @@ cd "$install_dir/bin" || fail
 
 run_shard=("${bin_prefix[@]}")
 run_shard+=(./dontstarve_dedicated_server_nullrenderer)
-run_shard+=(-console)
-run_shard+=(-cluster "$cluster_name")
 
 # PIDs
 self_pid=$$
@@ -405,28 +403,55 @@ children_pids=()
 slave_shard_idx=0
 
 function basic_start_shard() {
-	echo "${BOLD}Starting shard $1...${NORMAL}"
+	local IS_FINAL="$1"
+
+	shift
+
+	local shardid="$1"
+	local shardname="$2"
+
+	local wrapcmd=()
+	if [[ ! -z "$IS_FINAL" && ! -z "$rlwrap_cmd" ]]; then
+		local histfile="$dontstarve_dir/$cluster_name/$shardid/tty_console_hist.txt"
+		local prompt="${shardname}> "
+		touch "$histfile"
+		wrapcmd+=("$rlwrap_cmd" -R -H "$histfile" -s $histsize -f . -S "$prompt")
+	fi
 
 	local MYPID=$BASHPID
 
-	local PRECMDS=()
-
-	if [[ $MYPID -ne $self_pid ]]; then
-		PRECMDS+=("exec")
+	if [[ $MYPID -eq $$ ]]; then
+		if [[ -z "$IS_FINAL" ]]; then
+			(basic_start_shard "" "$@") &
+		else
+			exec 6< <("${wrapcmd[@]}" stdbuf -i0 -o0 cat && echo ';' && echo 'c_shutdown();')
+			(basic_start_shard "final" "$@") <&6
+			exec 6<&-
+		fi
+		return $?
 	fi
 
-	if [[ $$ -eq $self_pid && ! -z "$rlwrap_cmd" ]]; then
-		local histfile="$dontstarve_dir/$cluster_name/$1/tty_console_hist.txt"
-		local prompt="$2> "
-		touch "$histfile"
-		PRECMDS+=("$rlwrap_cmd" -R -H "$histfile" -s $histsize -f . -S "$prompt")
+	echo "${BOLD}Starting shard $1...${NORMAL}"
+
+	###
+
+	local BASICOPTS=(-monitor-parent-process "$MYPID")
+	BASICOPTS+=(-cluster "$cluster_name" -shard "$shardid")
+
+	local wrapcmd=()
+
+	if [[ ! -z "$IS_FINAL" ]]; then
+		BASICOPTS+=(-console)
 	fi
 
-	local fullcmd=("${PRECMDS[@]}" "${run_shard[@]}" -monitor-parent-process 
-		"$MYPID" -shard "$1" "${serveropts[@]}")
+	local fullcmd=("${run_shard[@]}"
+		"${BASICOPTS[@]}" "${serveropts[@]}")
 
-	echo "${BOLD}Running${NORMAL} '${fullcmd[@]}'..."
-	"${fullcmd[@]}"
+	local pipeoutcmd=(sed -e "s/^/$shardname($MYPID): /")
+
+	#echo "Running '${fullcmd[@]}'..."
+
+	exec "${fullcmd[@]}" > >("${pipeoutcmd[@]}")
 }
 
 function prettify_shardname() {
@@ -441,16 +466,18 @@ function prettify_shardname() {
 
 function start_single_shard() {
 	local name="$(prettify_shardname "$1")"
-	(local MYPID=$BASHPID ;
-	 basic_start_shard "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
-	 )
+	basic_start_shard "final" "$1" "$name"
+	#(local MYPID=$BASHPID ;
+	# basic_start_shard "1" "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
+	# )
 }
 
 function start_slave_shard() {
 	local name="$(prettify_shardname "$1")"
-	(local MYPID=$BASHPID ;
-	 basic_start_shard "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
-	 ) &
+	basic_start_shard "" "$1" "$name"
+	#(local MYPID=$BASHPID ;
+	# basic_start_shard "" "$1" "$name" > >(sed -e "s/^/$name($MYPID):  /")
+	# ) &
 	children_pids+=($!)
 	slave_shard_idx=$(( $slave_shard_idx + 1 ))
 }
