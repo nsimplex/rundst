@@ -424,11 +424,11 @@ function basic_start_shard() {
 		if [[ -z "$IS_FINAL" ]]; then
 			(basic_start_shard "" "$@") &
 		else
-			exec 6< <("${wrapcmd[@]}" stdbuf -i0 -o0 cat && echo ';' && echo 'c_shutdown();')
-			if ! (basic_start_shard "final" "$@") <&6; then
-                stty echo
-            fi
+            local tty_save="$(stty -g)"
+			exec 6< <("${wrapcmd[@]}" cat && echo ';' && echo 'c_shutdown();')
+			(basic_start_shard "final" "$@") <&6
 			exec 6<&-
+            stty "$tty_save"
 		fi
 		return $?
 	fi
