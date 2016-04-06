@@ -12,7 +12,6 @@ The main features of this script are:
     * Ctrl-R provides reverse lookup on the command history.
     * Tab provides autocompletion based on the command history.
     * A prompt with the master shard name followed by "> " precedes command input.
-* Sending EOF (Ctrl-D) over an empty input line is translated into a `c_shutdown()` command for the master shard. This causes the whole cluster to exit gracefully.
 * Support for easily installing/updating beta branches.
 
 ## Usage
